@@ -9,6 +9,10 @@ pub enum MicroDonationsError {
     ProjectNotFound,
     #[error("Invalid amount")]
     InvalidAmount,
+    #[error("Project already exists")]
+    ProjectAlreadyExists,
+    #[error("Donation exceeds project goal")]
+    GoalExceeded,
 }
 
 #[contractimpl]
@@ -18,14 +22,23 @@ impl MicroDonations {
         env.storage().instance().set(&symbol_short!("projects"), &Map::<Symbol, i128>::new(&env));
     }
 
-    pub fn create_project(env: Env, name: Symbol, goal: i128) {
+    pub fn create_project(env: Env, name: Symbol, goal: i128) -> Result<(), MicroDonationsError> {
         let admin: Address = env.storage().instance().get(&symbol_short!("admin")).unwrap().unwrap();
         admin.require_auth();
 
+        if goal <= 0 {
+            return Err(MicroDonationsError::InvalidAmount);
+        }
+
         let mut projects: Map<Symbol, i128> = env.storage().instance().get(&symbol_short!("projects")).unwrap().unwrap();
+        if projects.contains_key(name) {
+            return Err(MicroDonationsError::ProjectAlreadyExists);
+        }
+
         projects.set(name, 0);
         env.storage().instance().set(&symbol_short!("projects"), &projects);
         env.storage().instance().set(&name, &goal);
+        Ok(())
     }
 
     pub fn donate(env: Env, project: Symbol, amount: i128) -> Result<(), MicroDonationsError> {
@@ -34,7 +47,12 @@ impl MicroDonations {
         if amount <= 0 {
             return Err(MicroDonationsError::InvalidAmount);
         }
-        projects.set(project, current_amount + amount);
+        let goal: i128 = env.storage().instance().get(&project).unwrap().unwrap();
+        let new_amount = current_amount + amount;
+        if new_amount > goal {
+            return Err(MicroDonationsError::GoalExceeded);
+        }
+        projects.set(project, new_amount);
         env.storage().instance().set(&symbol_short!("projects"), &projects);
         Ok(())
     }
@@ -78,13 +96,44 @@ mod tests {
 
         env.mock_all_auths();
 
-        MicroDonations::create_project(&env, project_name, goal);
+        MicroDonations::create_project(&env, project_name, goal).unwrap();
 
         let projects: Map<Symbol, i128> = env.storage().instance().get(&symbol_short!("projects")).unwrap().unwrap();
         assert_eq!(projects.get(project_name).unwrap(), 0);
 
         let stored_goal: i128 = env.storage().instance().get(&project_name).unwrap().unwrap();
         assert_eq!(stored_goal, goal);
+    }
+
+    #[test]
+    fn test_create_project_invalid_goal() {
+        let env = Env::default();
+        let admin = Address::random(&env);
+        MicroDonations::init(&env, admin.clone());
+
+        let project_name = symbol_short!("test_project");
+        let goal = 0;
+
+        env.mock_all_auths();
+
+        let result = MicroDonations::create_project(&env, project_name, goal);
+        assert!(matches!(result, Err(MicroDonationsError::InvalidAmount)));
+    }
+
+    #[test]
+    fn test_create_duplicate_project() {
+        let env = Env::default();
+        let admin = Address::random(&env);
+        MicroDonations::init(&env, admin.clone());
+
+        let project_name = symbol_short!("test_project");
+        let goal = 1000;
+
+        env.mock_all_auths();
+
+        MicroDonations::create_project(&env, project_name, goal).unwrap();
+        let result = MicroDonations::create_project(&env, project_name, goal);
+        assert!(matches!(result, Err(MicroDonationsError::ProjectAlreadyExists)));
     }
 
     #[test]
@@ -98,11 +147,28 @@ mod tests {
 
         env.mock_all_auths();
 
-        MicroDonations::create_project(&env, project_name, goal);
+        MicroDonations::create_project(&env, project_name, goal).unwrap();
         MicroDonations::donate(&env, project_name, 500).unwrap();
 
         let projects: Map<Symbol, i128> = env.storage().instance().get(&symbol_short!("projects")).unwrap().unwrap();
         assert_eq!(projects.get(project_name).unwrap(), 500);
+    }
+
+    #[test]
+    fn test_donate_exceed_goal() {
+        let env = Env::default();
+        let admin = Address::random(&env);
+        MicroDonations::init(&env, admin.clone());
+
+        let project_name = symbol_short!("test_project");
+        let goal = 1000;
+
+        env.mock_all_auths();
+
+        MicroDonations::create_project(&env, project_name, goal).unwrap();
+        MicroDonations::donate(&env, project_name, 500).unwrap();
+        let result = MicroDonations::donate(&env, project_name, 501);
+        assert!(matches!(result, Err(MicroDonationsError::GoalExceeded)));
     }
 
     #[test]
@@ -116,7 +182,7 @@ mod tests {
 
         env.mock_all_auths();
 
-        MicroDonations::create_project(&env, project_name, goal);
+        MicroDonations::create_project(&env, project_name, goal).unwrap();
         MicroDonations::donate(&env, project_name, 500).unwrap();
 
         let status = MicroDonations::get_project_status(&env, project_name).unwrap();
@@ -131,8 +197,8 @@ mod tests {
 
         env.mock_all_auths();
 
-        MicroDonations::create_project(&env, symbol_short!("project1"), 1000);
-        MicroDonations::create_project(&env, symbol_short!("project2"), 2000);
+        MicroDonations::create_project(&env, symbol_short!("project1"), 1000).unwrap();
+        MicroDonations::create_project(&env, symbol_short!("project2"), 2000).unwrap();
 
         let all_projects = MicroDonations::get_all_projects(&env);
         assert_eq!(all_projects.len(), 2);
