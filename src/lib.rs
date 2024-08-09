@@ -45,6 +45,11 @@ impl MicroDonations {
         let goal: i128 = env.storage().instance().get(&project).unwrap().unwrap();
         Ok(vec![&env, current_amount, goal])
     }
+
+    pub fn get_all_projects(env: Env) -> Vec<Symbol> {
+        let projects: Map<Symbol, i128> = env.storage().instance().get(&symbol_short!("projects")).unwrap().unwrap();
+        projects.keys()
+    }
 }
 
 #[cfg(test)]
@@ -116,5 +121,22 @@ mod tests {
 
         let status = MicroDonations::get_project_status(&env, project_name).unwrap();
         assert_eq!(status, vec![&env, 500, 1000]);
+    }
+
+    #[test]
+    fn test_get_all_projects() {
+        let env = Env::default();
+        let admin = Address::random(&env);
+        MicroDonations::init(&env, admin.clone());
+
+        env.mock_all_auths();
+
+        MicroDonations::create_project(&env, symbol_short!("project1"), 1000);
+        MicroDonations::create_project(&env, symbol_short!("project2"), 2000);
+
+        let all_projects = MicroDonations::get_all_projects(&env);
+        assert_eq!(all_projects.len(), 2);
+        assert!(all_projects.contains(&symbol_short!("project1")));
+        assert!(all_projects.contains(&symbol_short!("project2")));
     }
 }
