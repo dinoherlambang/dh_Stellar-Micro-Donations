@@ -48,14 +48,12 @@ export class StellarService {
   }
 
   async getProjects() {
-    // This is a placeholder implementation. In a real-world scenario,
-    // you would need to implement a method in the smart contract to return all projects.
     const transaction = new TransactionBuilder(this.account.publicKey(), {
       fee: await this.server.fetchBaseFee(),
       networkPassphrase: Networks.TESTNET,
     })
     .addOperation(Operation.invokeHostFunction({
-      function: 'get_all_projects', // Assuming this function exists in the smart contract
+      function: 'get_all_projects',
       parameters: [],
       contractId: this.contractId,
     }))
@@ -64,7 +62,7 @@ export class StellarService {
     const result = await this.signAndSubmitTransaction(transaction);
     // Parse the result to extract project information
     // This will depend on how the smart contract returns the data
-    return result;
+    return result.result.retval;
   }
 
   async getProjectStatus(project: string) {
@@ -79,6 +77,7 @@ export class StellarService {
     }))
     .setTimeout(30);
 
-    return await this.signAndSubmitTransaction(transaction);
+    const result = await this.signAndSubmitTransaction(transaction);
+    return result.result.retval;
   }
 }
